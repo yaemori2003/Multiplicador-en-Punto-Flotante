@@ -1,122 +1,103 @@
-﻿#include <iostream>
+#include <iostream>
+#include <iomanip>
 #include <bitset>
 #include <cmath>
 
 using namespace std;
 
-void mostrarIEEE754(float numero);
-struct Flotante32;
-Flotante32 dividir(float num);
-float juntar(const Flotante32& num);
+void extraerComponentes(float valor, int& signo, int& exponente, int& fraccion) {
+    unsigned int bits = *(unsigned int*)&valor;
+    signo = (bits >> 31) & 1;
+    exponente = (bits >> 23) & 0xFF;
+    fraccion = bits & 0x7FFFFF;
+}
 
-struct Flotante32 {
-    int signo;
-    int exponente;
-    unsigned int mantisa;
-};
+float combinarComponentes(int signo, int exponente, int fraccion) {
+    unsigned int bits = (signo << 31) | (exponente << 23) | (fraccion & 0x7FFFFF);
+    return *(float*)&bits;
+}
 
-void imprimirLinea() {
-    cout << "+---------------------------------------------+" << endl;
+unsigned long long ajustarRedondeo(unsigned long long fraccion) {
+    if ((fraccion & 1) && ((fraccion >> 1) & 1)) {
+        fraccion++;
+    }
+    return fraccion;
+}
+
+bool esExponenteDemasiadoGrande(int exponenteRes) {
+    return exponenteRes >= 255;
+}
+
+bool esExponenteDemasiadoPequeno(int exponenteRes) {
+    return exponenteRes <= 0;
+}
+
+float multiplicarFlotantes(float x, float y) {
+    int signoX, expX, fracX;
+    int signoY, expY, fracY;
+
+    extraerComponentes(x, signoX, expX, fracX);
+    extraerComponentes(y, signoY, expY, fracY);
+
+    if (x == 0.0f || y == 0.0f) {
+        return 0.0f;
+    }
+
+    int expRes = expX + expY - 127;
+
+    if (esExponenteDemasiadoGrande(expRes)) {
+        return INFINITY;
+    }
+
+    if (esExponenteDemasiadoPequeno(expRes)) {
+        return 0.0f;
+    }
+
+    unsigned long long fracRes = (static_cast<unsigned long long>(fracX | 0x800000)) * (fracY | 0x800000);
+
+    if (fracRes & (1ULL << 47)) {
+        fracRes >>= 24;
+        expRes++;
+    }
+    else {
+        fracRes >>= 23;
+    }
+
+    fracRes = ajustarRedondeo(fracRes);
+    fracRes &= 0x7FFFFF;
+
+    int signoRes = signoX ^ signoY;
+    return combinarComponentes(signoRes, expRes, fracRes);
+}
+
+void imprimirBits(float valor) {
+    unsigned int bits = *(unsigned int*)&valor;
+    cout << bitset<32>(bits) << endl;
 }
 
 int main() {
-    float x, y;
-    cout << "Ingrese dos numeros en punto flotante: ";
-    cin >> x >> y;
+    float num1, num2;
+    cout << "Introduce dos numeros en punto flotante: ";
+    cin >> num1 >> num2;
 
-    imprimirLinea();
-    cout << "|           Proceso de Calculo Iniciado       |" << endl;
-    imprimirLinea();
+    cout << "Bits de num1: ";
+    imprimirBits(num1);
+    cout << "Bits de num2: ";
+    imprimirBits(num2);
 
-    if (x == 0 || y == 0) {
-        imprimirLinea();
-        cout << "| Resultado: 0                               |" << endl;
-        imprimirLinea();
-        return 0;
-    }
+    float resultadoManual = multiplicarFlotantes(num1, num2);
+    cout << "Resultado (Implementacion personalizada) en base 10: " << resultadoManual << endl;
+    cout << "Bits del resultado (Implementacion personalizada): ";
+    imprimirBits(resultadoManual);
 
-    Flotante32 numX = dividir(x);
-    Flotante32 numY = dividir(y);
+    float resultadoNativo = num1 * num2;
+    cout << "Resultado (C++ nativo) en base 10: " << resultadoNativo << endl;
+    cout << "Bits del resultado (C++ nativo): ";
+    imprimirBits(resultadoNativo);
 
-    int exponenteResultado = (numX.exponente + numY.exponente - 127);
-    unsigned long long mantisaResultado = (unsigned long long)numX.mantisa * numY.mantisa;
-
-    if (mantisaResultado & (1LL << 47)) {
-        mantisaResultado >>= 1;
-        exponenteResultado++;
-    }
-
-    if (exponenteResultado >= 255) {
-        imprimirLinea();
-        cout << "|            Overflow en exponente            |" << endl;
-        imprimirLinea();
-        return 0;
-    }
-    else if (exponenteResultado <= 0) {
-        imprimirLinea();
-        cout << "|            Underflow en exponente           |" << endl;
-        imprimirLinea();
-        return 0;
-    }
-
-    mantisaResultado >>= 24;
-
-    Flotante32 resultado;
-    resultado.signo = numX.signo ^ numY.signo;
-    resultado.exponente = exponenteResultado;
-    resultado.mantisa = mantisaResultado;
-
-    float finalResult = juntar(resultado);
-
-    imprimirLinea();
-    cout << "|              Resultado Final               |" << endl;
-    imprimirLinea();
-
-    cout << "| Resultado final: " << finalResult << endl;
-    imprimirLinea();
-
-    mostrarIEEE754(finalResult);
+    float diferencia = fabs(resultadoManual - resultadoNativo);
+    cout << fixed << setprecision(10);
+    cout << "Diferencia entre resultados: " << diferencia << endl;
 
     return 0;
-}
-
-void mostrarIEEE754(float numero) {
-    unsigned int bits = *reinterpret_cast<unsigned int*>(&numero);
-    imprimirLinea();
-    cout << "| El numero decimal " << numero << " en formato IEEE 754 |" << endl;
-    cout << "| de 32 bits es:                                   |" << endl;
-    imprimirLinea();
-    cout << "| Representacion binaria: " << bitset<32>(bits) << " |" << endl;
-    imprimirLinea();
-}
-
-Flotante32 dividir(float num) {
-    Flotante32 result;
-    unsigned int bits = *reinterpret_cast<unsigned int*>(&num);
-
-    result.signo = (bits >> 31) & 1;
-    result.exponente = (bits >> 23) & 0xFF;
-    result.mantisa = (bits & 0x7FFFFF) | (1 << 23);
-
-    imprimirLinea();
-    cout << "|          Descomposicion de " << num << "           |" << endl;
-    imprimirLinea();
-
-    cout << "| Numero: " << num << endl;
-    cout << "| Signo: " << result.signo << endl;
-    cout << "| Exponente: " << result.exponente << endl;
-    cout << "| Mantisa: " << bitset<24>(result.mantisa) << " (en binario) |" << endl;
-    imprimirLinea();
-
-    return result;
-}
-
-float juntar(const Flotante32& num) {
-    unsigned int resultado = 0;
-    unsigned int mantisa = num.mantisa & 0x7FFFFF;
-    resultado |= (num.signo << 31);
-    resultado |= (num.exponente << 23);
-    resultado |= mantisa;
-
-    return *reinterpret_cast<float*>(&resultado);
 }
